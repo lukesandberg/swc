@@ -7,7 +7,7 @@ use swc_common::Span;
 
 use crate::LogosError;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TokenState {
     pub had_line_break: bool,
     pub value: TokenValue,

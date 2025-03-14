@@ -1,6 +1,6 @@
 use logos::{Lexer, Logos};
 
-use crate::{LogosError, TokenType};
+use crate::{token::TokenState, LogosError, TokenType, TokenValue};
 
 pub fn consume_str_single_quote(lex: &mut Lexer<TokenType>) -> Result<(), LogosError> {
     consume_str(lex, StrContent::SingleQuote)
@@ -11,31 +11,23 @@ pub fn consume_str_double_quote(lex: &mut Lexer<TokenType>) -> Result<(), LogosE
 }
 
 fn consume_str(lex: &mut Lexer<TokenType>, stop_token: StrContent) -> Result<(), LogosError> {
-    let remainder = lex.remainder();
-    let total_len = remainder.len();
-
-    let mut str_lexer = Lexer::<StrContent>::new(remainder);
-    let mut terminated = false;
+    let mut str_lexer = lex.clone().morph::<StrContent>();
 
     while let Some(Ok(token)) = str_lexer.next() {
         if token == stop_token {
-            terminated = true;
-            break;
+            str_lexer.extras.value = TokenValue::Str { value: (), raw: () };
+
+            *lex = str_lexer.morph();
+
+            return Ok(());
         }
     }
 
-    let left_len = str_lexer.remainder().len();
-    let consumed = total_len - left_len;
-    lex.bump(consumed);
-
-    if !terminated {
-        return Err(LogosError::UnterminatedStr);
-    }
-
-    Ok(())
+    Err(LogosError::UnterminatedStr)
 }
 
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq)]
+#[logos(error = LogosError, extras = TokenState)]
 enum StrContent {
     #[regex(r#"\\["'\\bfnrtv]"#, priority = 100)]
     #[regex(r#"\\0[0-7]*"#, priority = 100)]
