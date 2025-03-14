@@ -7,7 +7,11 @@ use swc_common::Span;
 
 use crate::LogosError;
 
-pub struct TokenState {}
+#[derive(Debug, Default)]
+pub struct TokenState {
+    pub had_line_break: bool,
+    pub value: TokenValue,
+}
 
 /// Performance-optimized token type
 /// Represented as u8 to minimize memory usage
