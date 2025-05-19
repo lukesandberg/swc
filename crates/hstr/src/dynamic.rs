@@ -61,11 +61,7 @@ pub(crate) unsafe fn restore_arc(v: TaggedValue) -> Item {
     Item(ThinArc::from_raw(ptr))
 }
 
-/// A store that stores [Atom]s. Can be merged with other [AtomStore]s for
-/// better performance.
-///
-///
-/// # Merging [AtomStore]
+/// A store that stores [Atom]s.
 pub struct AtomStore {
     pub(crate) data: hashbrown::HashMap<Item, (), BuildEntryHasher>,
 }
@@ -81,7 +77,28 @@ impl Default for AtomStore {
 impl AtomStore {
     #[inline(always)]
     pub fn atom<'a>(&mut self, text: impl Into<Cow<'a, str>>) -> Atom {
-        atom_in(self, &text.into(), false)
+        atom_in(&mut self.data, &text.into(), false, false)
+    }
+}
+
+/// A store that stores [Atom]s that are always interned regardless of their
+/// length.
+pub struct AlwaysInterningAtomStore {
+    pub(crate) data: hashbrown::HashMap<Item, (), BuildEntryHasher>,
+}
+
+impl Default for AlwaysInterningAtomStore {
+    fn default() -> Self {
+        Self {
+            data: hashbrown::HashMap::with_capacity_and_hasher(64, Default::default()),
+        }
+    }
+}
+
+impl AlwaysInterningAtomStore {
+    #[inline(always)]
+    pub fn atom<'a>(&mut self, text: impl Into<Cow<'a, str>>) -> Atom {
+        atom_in(&mut self.data, &text.into(), false, true)
     }
 }
 
@@ -110,13 +127,13 @@ pub(crate) fn global_atom(text: &str) -> Atom {
     GLOBAL_DATA.with(|global| {
         let mut store = global.borrow_mut();
 
-        atom_in(&mut *store, text, true)
+        atom_in(&mut store.data, text, true, false)
     })
 }
 
 /// This can create any kind of [Atom], although this lives in the `dynamic`
 /// module.
-pub(crate) fn atom_in<S>(storage: S, text: &str, is_global: bool) -> Atom
+pub(crate) fn atom_in<S>(storage: S, text: &str, is_global: bool, always_intern: bool) -> Atom
 where
     S: Storage,
 {
@@ -133,7 +150,7 @@ where
     }
 
     let hash = calc_hash(text);
-    let entry = storage.insert_entry(text, hash, is_global);
+    let entry = storage.insert_entry(text, hash, is_global, always_intern);
     let entry = ThinArc::into_raw(entry.into_inner()) as *mut c_void;
 
     let ptr: NonNull<c_void> = unsafe {
@@ -147,14 +164,14 @@ where
 }
 
 pub(crate) trait Storage {
-    fn insert_entry(self, text: &str, hash: u64, is_global: bool) -> Item;
+    fn insert_entry(self, text: &str, hash: u64, is_global: bool, always_intern: bool) -> Item;
 }
 
-impl Storage for &'_ mut AtomStore {
+impl Storage for &'_ mut hashbrown::HashMap<Item, (), BuildEntryHasher> {
     #[inline(never)]
-    fn insert_entry(self, text: &str, hash: u64, is_global: bool) -> Item {
+    fn insert_entry(self, text: &str, hash: u64, is_global: bool, always_intern: bool) -> Item {
         // If the text is too long, interning is not worth it.
-        if text.len() > 512 {
+        if !always_intern && text.len() > 512 {
             return Item(ThinArc::from_header_and_slice(
                 HeaderWithLength::new(Metadata { hash, is_global }, text.len()),
                 text.as_bytes(),
@@ -162,7 +179,6 @@ impl Storage for &'_ mut AtomStore {
         }
 
         let (entry, _) = self
-            .data
             .raw_entry_mut()
             .from_hash(hash, |key| {
                 key.header.header.header.hash == hash && key.slice == *text.as_bytes()

@@ -14,7 +14,7 @@ use std::{
 use debug_unreachable::debug_unreachable;
 use once_cell::sync::Lazy;
 
-pub use crate::dynamic::AtomStore;
+pub use crate::dynamic::{AlwaysInterningAtomStore, AtomStore};
 use crate::tagged_value::TaggedValue;
 
 mod dynamic;
